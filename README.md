@@ -1,21 +1,25 @@
 # sentinel-omni-policy
  Hashicorp sentinel policy that uses declarative markup to create a base set of rules for any resource terraform supports.  This repo includes the following components:
 
- - The omni sentinel policy that uses the python-omni-data repository to define rules for terraform arguments.
+ - The omni sentinel policy that uses the python-omni-data repository to define rules for Terraform arguments.
  - Sentinel test configurations for those policies
 
  It is intended to be combined with the following:
 
- - A Terrafrom Enteprise workspace, which runs Terraform to update your Sentinel policies whenever the repo changes.
+ - A Terraform Enteprise workspace, which runs Terraform to update your Sentinel policies whenever the repo changes.
  - A lightweight CI solution (like Github Actions), for continuously testing your sentinel code.
 
 ## How it works
- This sentinel policy can be used against any provider, resource and argument that Terraform supports.  It uses a dynamic lookup against a repository of json documents created in the omni-policy framework found at openrba/python-omni-policy.  It includes the following capabilities.
+ This sentinel policy can be used against any provider, resource and argument that Terraform supports.  For each resource being modified in Terraform it does a lookup of the omni-policy map for that resource located at openrba/python-omni-policy and applies a set of rules based on certain keys provided by that map.  The following keys are used by this policy:
 
- - **Status** - Status is similar to a mandatory access control framework that is loosely based on the excellent techradar ring status from Thoughtworks.  Five rings exist eg. REJECT, HOLD, ASSESS, TRIAL, ADOPT.  A resource is permitted in Terraform if the min_ring parameter passed in is lower than the resource's ring status.  For example, if the sentinel policy is initiated with the parameter min_ring=ASSESS then any resource with a status of ASSESS,TRIAL, and ADOPT would be permitted.  RBA uses this status to determine if certain providers or resources are permitted in various environments (dev,prod).  It allows the technology groups to clearly understand the status of various technologies within the organization.
- - **String Match** - Will match a resource's argument against a single string.  Example "standard" matches "standard"
- - **List Match** - Will match a resource's argument against any of a list of strings.  Example "['enabled','disabled']" will match on either "enabled" or "disabled".
- - **Regex Match** - Will match a resource's argument against a regex expression, note regex expression must start with the "^" character or it will default to a string match.  Example: "^[a-z]." will permit any alpha lowercase chracters.
- - **Convention Match** -  Expects a naming convention that includes lookup fields agains the custom.json values in python-omni-policy.  Example: the value of `<market>-<businessUnit>-[0-9][0-9]` will match to `us-core-01` assuming `us` is an allowed_value for market and `core` is allowed_value for businessUnit in your custom.json. 
+ - **status** (resource) - Status is a key-value pair at the resource level that indicates the current ring level of the resource.  Ring levels are a continuation of the excellent work of the thoughworks techradar that organizes technologies into five distinct classifications e.g REJECT,HOLD,ASSESS,TRIAL,ADOPT. Using the input parameter min_ring, the sentinel policy applies a mandatory access control method to permit anything at that ring level or higher.  For example a min_ring value of "ASSESS" would permit any resource at a ring level of ASSESS,TRIAL, and ADOPT.
+
+- **required** (argument) - Required is a key-value pair at the argument level of a resource that indicates whether the argument is required or not.  This policy uses this key from the omni-policy map for the resource to assure the argument is present in any resource being created through Terraform.
+
+- **policy** (argument) - Policy is a key-value pair at the argument level that indicates the policy to be applied to the argument's value when passed through the policy.  It includes the following capabilities:
+    - **string-match** - Exact match of an argument's value against a specific string and is the simpliest form of enforcing a specific value.  Example: `standard` matches only "standard".
+    - **list-match** - Exact match of an argument's value against *any* of a list of strings.  Example: `['standard','basic']` would match either "standard" or "basic".
+    - **regex-match** - A regex match of an argument's value against a specific regex expression.  This value must start with a `^` or a string-match will occur.  Example: `^[a-z].` would validate that the argument must contain any number of lowercase alpha characters.
+    - **convention-match** - A match that expects a naming convention that includes lookup fields.  Fields will be looked up against the custom.json map that contains allowed_values for a particular field.  Example: the value of `<market>-<businessUnit>-[0-9][0-9]` will match to `us-core-01` assuming `us` is an allowed_value for market and `core` is allowed_value for businessUnit in your custom.json.
 
 
