@@ -1,0 +1,203 @@
+# This policy uses the Sentinel tfplan and external json docs to require that all 
+# resource deployments meet the policy requirements outlined in the yaml documents.
+
+# Note that the comparison is always case-sensitive.
+
+##### Imports #####
+
+import "tfplan/v2" as tfplan
+import "strings"
+import "types"
+import "http"
+import "json"
+
+
+# Go heade and fetch the naming convention allowed values
+req = http.request("https://raw.githubusercontent.com/openrba/python-azure-naming/master/custom.json")
+naming_dct = json.unmarshal(http.get(req).body)
+
+##### Functions #####
+
+validate_naming_convention = func(policy,value){
+# This function takes in a naming convention policy and a proposed value
+# and determines if the convention meets the value provided.
+# Expects policy in the form of <variablename1>-<variablename2>-[0-9][0-9]
+
+    x = 0
+    str = ""
+    keep_going = true
+
+    for strings.split(policy, ">") as e{
+    # Break convention into elements
+
+        # If the check has failed on a previous loop we are done    
+        if not keep_going{
+            break
+        }
+
+        # If this is the first loop start with a string beginning regex
+        if x == 0{
+            str += "^"
+        }
+
+        # Split the element into fields that we can look up
+        fields = strings.split(e,"<")
+
+        # Get the characters in between the fields and save them
+        if fields[0] is not null{
+            str += fields[0]
+        }
+
+        # Lets start to look up allowed values for the field
+        if fields[1] else null is not null{
+            var = fields[1]
+    
+            if naming_dct[var] else null is not null {
+            # The field exists in the naming convention lookup    
+                
+                keep_going = false
+                # Set the pointer to false unless we can validate
+
+                for naming_dct[var]["allowed_values"] as short_name, long_name{
+                # Loop through all the allowed values and see if we match
+                    reg = str + short_name
+                    #print(reg)
+                    if value matches reg+"*." {
+                    # We found a match, lets keep going
+                        keep_going = true
+                        str = reg
+                        break
+                    }
+                }
+            }
+            
+        }
+        x = x + 1
+    }
+    
+    # Do the final regex expression check to see if we match the convention
+    if value matches str {
+        validated = true
+    }else{
+        validated = false
+    }
+    return validated
+}
+
+
+validate_resource = func(name,resource){
+    validated = true
+    req = http.request("https://raw.githubusercontent.com/openrba/" +
+                        "python-terraform-policy/master/data/" +
+                        name + 
+                        ".json")
+    policy_dict = json.unmarshal(http.get(req).body)
+    
+    arguments = policy_dict[name]["arguments"]
+    
+    # Validate all required arguments exist
+    for arguments as arg{
+        if arguments[arg]["required"]{
+            if resource.applied[arg] else null is null {
+                validated = false
+                print("Policy check failed. Required argument '",
+                        arg,":' is missing for resource",name,".")
+            }
+        }
+    }
+
+    for resource.applied else {} as key,value {
+        # Check to see if attribute exists in the policy
+        argument = policy_dict[name]["arguments"][key]
+
+        if argument else null is not null {
+            if argument["policy"] != "" {
+            # We have a policy for this argument
+
+                policy = argument["policy"]
+                
+                if policy matches "<*.>" {
+                # We need to validate a naming convention
+                    if not validate_naming_convention(policy,value) {
+                        print("Policy check failed: Argument '",key,
+                        ":' for resource",name,"did not meet the naming",
+                        "convention of",policy,"was given",value)
+                        validated = false
+                    }
+
+                } else if policy[0] else null is not null {
+                # Policy type is a list, check values against it
+                    in_list = false
+                    for policy as str {
+                        if str == value{
+                            in_list = true
+                        }
+                    }
+                    if in_list == false {
+                        print("Policy check failed: Argument '",key,
+                        ":' for resource",name,"did not meet the allowed",
+                        "values of",policy)
+                        validated = false
+                    }
+                } else if value not matches policy{
+                # Policy type is a regex and doesnt match
+                    print("Policy check failed. Argument '",key,
+                        ":' for resource",name,"did not meet the allowed",
+                        "value of",policy)
+                    validated = false
+                }
+            }
+        }
+    }
+    
+    return validated
+}
+
+validate_tags_and_values = func(){
+    
+    validated = false
+
+    # Iterate over all modules in the tfplan import
+    for tfplan.module_paths as path {
+        # Iterate over all resources in each module
+        for tfplan.module(path).resources else {} as name, resource {
+            # Iterate over resource types
+            for resource else {} as index, mains {
+                # Iterate over indexed resource
+                for mains else {} as index, r {
+                    # Skip anything that is being destroyed and not recreated
+                    if r.destroy and not r.requires_new {
+                        print("Skipping resource", address, "that is being destroyed.")
+                        continue
+                    }
+
+                    validated = validate_resource(name,r)
+
+                    # Check if the tags attribute is set
+                    attribute = "tags"
+
+                    if r.applied[attribute] else null is not null and
+                        (types.type_of(r.applied[attribute]) is "list" or
+                        types.type_of(r.applied[attribute]) is "map") {
+
+                        for r.applied[attribute] else {} as key,value {
+                
+                            if (dic[key]) else null is not null {
+                                for dic[key]["allowed_values"] else {} as short,long {
+                                    if long == value {
+                                        validated = true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return validated
+}
+
+
+validate_tags_and_values()
+main = 10 > 5
