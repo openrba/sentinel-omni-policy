@@ -13,7 +13,7 @@ import "json"
 
 
 # Go heade and fetch the naming convention allowed values
-req = http.request("https://raw.githubusercontent.com/openrba/python-azure-naming/master/custom.json")
+req = http.request("https://raw.githubusercontent.com/openrba/python-omni-policy/master/data/custom.json")
 naming_dct = json.unmarshal(http.get(req).body)
 
 ##### Functions #####
