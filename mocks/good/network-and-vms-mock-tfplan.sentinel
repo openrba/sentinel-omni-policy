@@ -515,7 +515,7 @@ _modules = {
 								{
 									"admin_password": "Password1234!",
 									"admin_username": "superadmin",
-									"computer_name":  "h1stname",
+									"computer_name":  "hostname",
 									"custom_data":    "74D93920-ED26-11E3-AC10-0800200C9A66",
 								},
 							],
