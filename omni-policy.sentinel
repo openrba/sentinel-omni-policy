@@ -12,7 +12,7 @@ import "http"
 import "json"
 
 
-# Go heade and fetch the naming convention allowed values
+# Pre-fetch the naming convention allowed values
 req = http.request("https://raw.githubusercontent.com/openrba/python-omni-policy/master/data/custom.json")
 naming_dct = json.unmarshal(http.get(req).body)
 
@@ -32,6 +32,7 @@ validate_naming_convention = func(policy,value){
 
         # If the check has failed on a previous loop we are done    
         if not keep_going{
+            str="[0-9](100)"
             break
         }
 
@@ -51,7 +52,7 @@ validate_naming_convention = func(policy,value){
         # Lets start to look up allowed values for the field
         if fields[1] else null is not null{
             var = fields[1]
-    
+            
             if naming_dct[var] else null is not null {
             # The field exists in the naming convention lookup    
                 
@@ -61,8 +62,7 @@ validate_naming_convention = func(policy,value){
                 for naming_dct[var]["allowed_values"] as short_name, long_name{
                 # Loop through all the allowed values and see if we match
                     reg = str + short_name
-                    #print(reg)
-                    if value matches reg+"*." {
+                    if value matches reg {
                     # We found a match, lets keep going
                         keep_going = true
                         str = reg
@@ -84,21 +84,47 @@ validate_naming_convention = func(policy,value){
     return validated
 }
 
-
 validate_resource = func(name,resource){
+# This function validates the resource against a set of policies that
+# are defined in the python-terraform-policy repository.  It performs
+# the following validation tests;
+# 1. Validates that are arguments listed as 'required' exist in this deployment
+# 2. Validates the argument policy against str,list,regex, and naming con.
+# 3. Validates tags against required, custom keys / values.
+
     validated = true
+    category = strings.split(name,"_")[0]
     req = http.request("https://raw.githubusercontent.com/openrba/" +
-                        "python-terraform-policy/master/data/" +
-                        name + 
-                        ".json")
+                        "python-omni-policy/master/data/" + category + "/" +
+                        name + ".json")
     policy_dict = json.unmarshal(http.get(req).body)
     
     arguments = policy_dict[name]["arguments"]
     
     # Validate all required arguments exist
+    provided_args = {}
+    for resource.applied else {} as key,value{
+        
+        if types.type_of(resource.applied[key]) is not "string" and 
+         types.type_of(resource.applied[key]) is not "bool" and
+         key is not "tags"{
+            # Handle the maps
+            if types.type_of(resource.applied[key][0]) is not "string"{
+                for resource.applied[key][0] else {} as k,v {
+                    provided_args[k] = v
+                }
+            }
+        }else{
+            # Append to the list of arguments
+            provided_args[key] = value
+        }
+    }
+
+    #print(provided_args)
+
     for arguments as arg{
         if arguments[arg]["required"]{
-            if resource.applied[arg] else null is null {
+            if arg not in keys(provided_args){
                 validated = false
                 print("Policy check failed. Required argument '",
                         arg,":' is missing for resource",name,".")
@@ -106,26 +132,49 @@ validate_resource = func(name,resource){
         }
     }
 
-    for resource.applied else {} as key,value {
+    for provided_args else {} as key,value {
+        
         # Check to see if attribute exists in the policy
         argument = policy_dict[name]["arguments"][key]
+        if key == "tags" {
+            
+            #First check if all required tags are present
+            provided_tags = keys(resource.applied["tags"])
+            required_tags = keys(naming_dct["tagName"]["allowed_values"])
 
+            if not all required_tags as rt {rt in provided_tags}{
+                validated = false
+                print("Policy check failed. At least one required tag '",
+                     required_tags,": is not present for resource",
+                     name)
+            }
+        
+            #Then lets check to make sure all required tags have allowed_values
+            for provided_tags else {} as key {
+                
+                var = naming_dct["tagName"]["allowed_values"][key] else false
+                if var is not false {
+                    supplied_value = resource.applied["tags"][key]
+                    if supplied_value not in naming_dct[var]["allowed_values"] {
+                        validated = false
+                        print("Policy check failed. Supplied tag '",
+                        key, "' contains a value '",supplied_value,"' that is",
+                        "not an allowed value for that tag - resource",name,".")
+                    }
+                }
+            }
+        }
         if argument else null is not null {
+            
             if argument["policy"] != "" {
+                
+                
             # We have a policy for this argument
 
                 policy = argument["policy"]
                 
-                if policy matches "<*.>" {
-                # We need to validate a naming convention
-                    if not validate_naming_convention(policy,value) {
-                        print("Policy check failed: Argument '",key,
-                        ":' for resource",name,"did not meet the naming",
-                        "convention of",policy,"was given",value)
-                        validated = false
-                    }
-
-                } else if policy[0] else null is not null {
+                if types.type_of(policy) is not "string" and 
+                   types.type_of(policy) is not "bool"{
                 # Policy type is a list, check values against it
                     in_list = false
                     for policy as str {
@@ -139,24 +188,43 @@ validate_resource = func(name,resource){
                         "values of",policy)
                         validated = false
                     }
-                } else if value not matches policy{
-                # Policy type is a regex and doesnt match
-                    print("Policy check failed. Argument '",key,
-                        ":' for resource",name,"did not meet the allowed",
-                        "value of",policy)
-                    validated = false
+                }else if  types.type_of(policy) is not "string"{
+                # Should be a bool
+                    if value != policy {
+                        print("Policy check failed. Argument '",key,
+                            ":' for resource",name,"did not meet the allowed",
+                            "value of",policy)
+                        validated = false
+                    }
+                }else{
+                    if policy matches "<*.>" {
+                    # We need to validate a naming convention
+                        if not validate_naming_convention(policy,value) {
+                            print("Policy check failed: Argument '",key,
+                            ":' for resource",name,"did not meet the naming",
+                            "convention of",policy,"was given",value)
+                            validated = false
+                        }
+                    } else if value not matches policy{
+                    # Policy type is a regex and doesnt match
+                        
+                        print("Policy check failed. Argument '",key,
+                            ":' for resource",name,"did not meet the allowed",
+                            "value of",policy)
+                        validated = false
+                        
+                    }
                 }
             }
         }
     }
-    
     return validated
 }
 
-validate_tags_and_values = func(){
+validate = func(){
     
     validated = false
-
+    validation_lst = []
     # Iterate over all modules in the tfplan import
     for tfplan.module_paths as path {
         # Iterate over all resources in each module
@@ -170,34 +238,31 @@ validate_tags_and_values = func(){
                         print("Skipping resource", address, "that is being destroyed.")
                         continue
                     }
-
-                    validated = validate_resource(name,r)
-
-                    # Check if the tags attribute is set
-                    attribute = "tags"
-
-                    if r.applied[attribute] else null is not null and
-                        (types.type_of(r.applied[attribute]) is "list" or
-                        types.type_of(r.applied[attribute]) is "map") {
-
-                        for r.applied[attribute] else {} as key,value {
-                
-                            if (dic[key]) else null is not null {
-                                for dic[key]["allowed_values"] else {} as short,long {
-                                    if long == value {
-                                        validated = true
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    # Validate the resource and arguments
+                    append(validation_lst,validate_resource(name,r))
+                    break
                 }
             }
         }
     }
-    return validated
+    if any validation_lst as v{v is false}{
+        return false
+    }else{
+        return true
+    }
 }
 
+test_regex = func(){
+    str = "h1stname"
+    for range(0,10) as i{
+        for ["^[a-z](5)"] as reg{
+            if str matches reg {
+                print("SUCCESS:",str,"matched",reg)
+            }
+        }
+    }
+    return true
+}
 
-validate_tags_and_values()
-main = 10 > 5
+#main = test_regex()
+main = validate()

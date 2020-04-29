@@ -1,5 +1,5 @@
 {
     "mock": {
-      "tfplan/v2": "mocks/network-and-vms-mock-tfplan.sentinel"
+      "tfplan/v2": "mocks/good/network-and-vms-mock-tfplan.sentinel"
     }
   }
